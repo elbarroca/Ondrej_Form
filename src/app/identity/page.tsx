@@ -1,10 +1,10 @@
 import { Shell } from "@/components/Shell";
-import { TripsHome } from "./TripsHome";
+import { IdentityForm } from "./IdentityForm";
 
 export default function Page() {
   return (
     <Shell>
-      <TripsHome />
+      <IdentityForm />
     </Shell>
   );
 }
