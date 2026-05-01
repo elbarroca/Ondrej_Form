@@ -5,7 +5,69 @@ import {
   StandardFonts,
   rgb,
 } from "pdf-lib";
-import type { Identity, Receipt, Trip } from "./types";
+import type { Identity, Receipt, ReceiptCategory, Trip } from "./types";
+
+const CATEGORY_ORDER: ReceiptCategory[] = [
+  "Flights",
+  "Lodging",
+  "Transport",
+  "Meals",
+  "Materials",
+  "Other",
+];
+
+interface CategoryGroup {
+  category: ReceiptCategory;
+  receipts: Receipt[];
+  sum: number;
+  description: string;
+  pageRange: string;
+}
+
+function buildGroups(
+  trip: Trip,
+  receipts: Receipt[],
+  pageCounts: Map<string, number>,
+): CategoryGroup[] {
+  const groups: CategoryGroup[] = [];
+  let pageCursor = 2;
+  const ordered = [...receipts].sort((a, b) => {
+    const ai = CATEGORY_ORDER.indexOf(a.category);
+    const bi = CATEGORY_ORDER.indexOf(b.category);
+    if (ai !== bi) return ai - bi;
+    return a.date.localeCompare(b.date);
+  });
+  for (const cat of CATEGORY_ORDER) {
+    const items = ordered.filter((r) => r.category === cat);
+    if (items.length === 0) continue;
+    const sum = items.reduce((s, r) => s + r.convertedAmount, 0);
+    const customDesc = trip.categoryDescriptions?.[cat]?.trim();
+    const description = customDesc
+      ? customDesc
+      : `${cat} (${items.length} ${items.length === 1 ? "receipt" : "receipts"})`;
+    const totalPages = items.reduce(
+      (s, r) => s + (pageCounts.get(r.id) ?? 1),
+      0,
+    );
+    const start = pageCursor;
+    const end = pageCursor + totalPages - 1;
+    const pageRange = totalPages === 1 ? `Page ${start}` : `Pages ${start}-${end}`;
+    pageCursor = end + 1;
+    groups.push({ category: cat, receipts: items, sum, description, pageRange });
+  }
+  return groups;
+}
+
+async function countReceiptPages(receipt: Receipt): Promise<number> {
+  if (receipt.imageType !== "application/pdf") return 1;
+  try {
+    const buf = new Uint8Array(await receipt.imageBlob.arrayBuffer());
+    const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+    return src.getPageCount();
+  } catch {
+    return 1;
+  }
+}
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
@@ -22,6 +84,18 @@ function fmtMoney(n: number, cur: string): string {
   return `${n.toFixed(2)} ${cur}`;
 }
 
+function sanitize(text: string): string {
+  return text
+    .replace(/[→➤➜]/g, "->")
+    .replace(/[←]/g, "<-")
+    .replace(/[–—]/g, "-")
+    .replace(/[‘’‚′]/g, "'")
+    .replace(/[“”„″]/g, '"')
+    .replace(/[•·‧]/g, "·")
+    .replace(/…/g, "...")
+    .replace(/ /g, " ");
+}
+
 function drawText(
   ctx: DrawCtx,
   text: string,
@@ -30,7 +104,7 @@ function drawText(
   size = 10,
   bold = false,
 ): void {
-  ctx.page.drawText(text, {
+  ctx.page.drawText(sanitize(text), {
     x,
     y,
     size,
@@ -72,7 +146,7 @@ function drawBox(
 }
 
 function wrap(text: string, font: PDFFont, size: number, maxW: number): string[] {
-  const words = text.split(/\s+/);
+  const words = sanitize(text).split(/\s+/);
   const lines: string[] = [];
   let current = "";
   for (const w of words) {
@@ -95,200 +169,322 @@ async function drawCover(
   trip: Trip,
   receipts: Receipt[],
   signatureImg: Uint8Array | null,
+  pageCounts: Map<string, number>,
 ): Promise<void> {
   const { page } = ctx;
+  const tableW = PAGE_W - MARGIN * 2;
   let y = PAGE_H - MARGIN;
 
-  drawText(ctx, "REIMBURSEMENT SHEET", MARGIN, y, 14, true);
-  y -= 18;
+  drawText(ctx, "REIMBURSEMENT SHEET", MARGIN, y, 13, true);
+  y -= 15;
   if (trip.organizationName) {
     drawText(ctx, trip.organizationName, MARGIN, y, 11, true);
     y -= 14;
   }
   drawText(
     ctx,
-    `${trip.eventName}${trip.location ? ` — ${trip.location}` : ""}`,
+    `${trip.eventName}${trip.location ? ` - ${trip.location}` : ""}`,
     MARGIN,
     y,
     11,
     true,
   );
-  y -= 20;
-
-  const tableW = PAGE_W - MARGIN * 2;
-  const labelW = 110;
-  const rows: Array<[string, string]> = [
-    ["Name", identity.fullName],
-    ["Address", identity.address],
-    [
-      "Postal / Place / Country",
-      [identity.postalCode, identity.place, identity.country]
-        .filter(Boolean)
-        .join(" / "),
-    ],
-    ["Phone", identity.phone],
-    ["E-mail", identity.email],
-    ["Bank account", identity.bankAccount],
-    ["IBAN", identity.iban],
-    ["BIC/SWIFT", identity.bicSwift],
-  ];
-
-  drawBox(page, MARGIN, y - rows.length * ROW_H, tableW, rows.length * ROW_H);
-  for (let i = 0; i < rows.length; i++) {
-    const rowY = y - (i + 1) * ROW_H;
-    drawLine(page, MARGIN + labelW, rowY, MARGIN + labelW, rowY + ROW_H);
-    if (i > 0) drawLine(page, MARGIN, rowY + ROW_H, MARGIN + tableW, rowY + ROW_H);
-    drawText(ctx, rows[i][0], MARGIN + 4, rowY + 5, 9, true);
-    drawText(ctx, rows[i][1] ?? "", MARGIN + labelW + 4, rowY + 5, 9);
-  }
-  y -= rows.length * ROW_H + 20;
-
-  drawText(ctx, "EXPENSES FOR REIMBURSEMENT", MARGIN, y, 11, true);
-  y -= 16;
-  drawText(
-    ctx,
-    `Total in ${trip.outputCurrency}. Receipts attached on following pages.`,
-    MARGIN,
-    y,
-    8,
-  );
   y -= 14;
 
-  const colDescX = MARGIN;
-  const colCatX = MARGIN + 240;
-  const colOrigX = MARGIN + 330;
-  const colConvX = MARGIN + 430;
-  const headerY = y;
-  drawBox(page, MARGIN, headerY - ROW_H, tableW, ROW_H);
-  drawText(ctx, "Description", colDescX + 4, headerY - 13, 9, true);
-  drawText(ctx, "Category", colCatX + 4, headerY - 13, 9, true);
-  drawText(ctx, "Original", colOrigX + 4, headerY - 13, 9, true);
-  drawText(
-    ctx,
-    `Sum ${trip.outputCurrency}`,
-    colConvX + 4,
-    headerY - 13,
+  // Identity table — match template layout
+  type Row =
+    | { kind: "single"; label: string; value: string }
+    | { kind: "triple"; cells: Array<[string, string]> }
+    | { kind: "note"; text: string; color: ReturnType<typeof rgb> };
+  const idRows: Row[] = [
+    { kind: "single", label: "Name:", value: identity.fullName },
+    { kind: "single", label: "Address:", value: identity.address },
+    {
+      kind: "triple",
+      cells: [
+        ["Postal code:", identity.postalCode],
+        ["Place:", identity.place],
+        ["Country:", identity.country],
+      ],
+    },
+    {
+      kind: "triple",
+      cells: [
+        ["Phone:", identity.phone],
+        ["E-mail:", identity.email],
+        ["", ""],
+      ],
+    },
+    { kind: "single", label: "Bank account:", value: identity.bankAccount },
+    {
+      kind: "note",
+      text: "If you have a foreign bank, please provide IBAN and SWIFT",
+      color: rgb(0.85, 0.15, 0.15),
+    },
+    { kind: "single", label: "IBAN number:", value: identity.iban },
+    { kind: "single", label: "BIC/SWIFT address:", value: identity.bicSwift },
+  ];
+
+  const idTableTop = y;
+  let rowY = idTableTop;
+  for (const row of idRows) {
+    rowY -= ROW_H;
+    drawBox(page, MARGIN, rowY, tableW, ROW_H);
+    if (row.kind === "single") {
+      drawText(ctx, row.label, MARGIN + 4, rowY + 5, 9, true);
+      const labelW = ctx.bold.widthOfTextAtSize(sanitize(row.label), 9);
+      drawText(ctx, row.value || "", MARGIN + 8 + labelW, rowY + 5, 9);
+    } else if (row.kind === "triple") {
+      const cellW = tableW / 3;
+      for (let i = 0; i < 3; i++) {
+        const x = MARGIN + cellW * i;
+        if (i > 0) drawLine(page, x, rowY, x, rowY + ROW_H);
+        const [lab, val] = row.cells[i];
+        if (lab) {
+          drawText(ctx, lab, x + 4, rowY + 5, 9, true);
+          const lw = ctx.bold.widthOfTextAtSize(sanitize(lab), 9);
+          drawText(ctx, val || "", x + 8 + lw, rowY + 5, 9);
+        }
+      }
+    } else {
+      page.drawText(sanitize(row.text), {
+        x: MARGIN + 4,
+        y: rowY + 5,
+        size: 9,
+        font: ctx.bold,
+        color: row.color,
+      });
+    }
+  }
+  y = rowY - 16;
+
+  // Expenses section header + callout
+  drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
+  drawText(ctx, "EXPENSES FOR REIMBURSEMENT", MARGIN + 4, y - 13, 10, true);
+  y -= ROW_H;
+  const calloutH = 28;
+  page.drawRectangle({
+    x: MARGIN,
+    y: y - calloutH,
+    width: tableW,
+    height: calloutH,
+    color: rgb(1, 0.96, 0.6),
+    borderColor: rgb(0, 0, 0),
+    borderWidth: 0.5,
+  });
+  const calloutLines = wrap(
+    "Please paste a copy or picture of your receipts in this document. Everything must be delivered as 1 PDF file.",
+    ctx.bold,
     9,
-    true,
+    tableW - 8,
   );
-  y = headerY - ROW_H;
+  let cyc = y - 11;
+  for (const line of calloutLines) {
+    page.drawText(sanitize(line), {
+      x: MARGIN + 4,
+      y: cyc,
+      size: 9,
+      font: ctx.bold,
+      color: rgb(0.78, 0.1, 0.1),
+    });
+    cyc -= 11;
+  }
+  y -= calloutH;
+
+  // Expense table
+  const groups = buildGroups(trip, receipts, pageCounts);
+  const colDescX = MARGIN;
+  const colSumX = MARGIN + 320;
+  const colAttachX = MARGIN + 410;
+
+  drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
+  drawLine(page, colSumX, y - ROW_H, colSumX, y);
+  drawLine(page, colAttachX, y - ROW_H, colAttachX, y);
+  drawText(ctx, "Description of costs:", colDescX + 4, y - 13, 9, true);
+  drawText(ctx, `Sum ${trip.outputCurrency}:`, colSumX + 4, y - 13, 9, true);
+  drawText(ctx, "Attached receipt:", colAttachX + 4, y - 13, 9, true);
+  y -= ROW_H;
 
   let total = 0;
-  for (let i = 0; i < receipts.length; i++) {
-    const r = receipts[i];
+  const minRows = 6;
+  const renderedGroups = groups.slice(0, minRows);
+  for (const g of renderedGroups) {
     drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
-    drawLine(page, colCatX, y - ROW_H, colCatX, y);
-    drawLine(page, colOrigX, y - ROW_H, colOrigX, y);
-    drawLine(page, colConvX, y - ROW_H, colConvX, y);
-    const desc = r.description || `Receipt ${i + 1}`;
-    drawText(ctx, desc.slice(0, 40), colDescX + 4, y - 13, 9);
-    drawText(ctx, r.category, colCatX + 4, y - 13, 9);
-    drawText(
-      ctx,
-      fmtMoney(r.originalAmount, r.originalCurrency),
-      colOrigX + 4,
-      y - 13,
-      9,
-    );
-    drawText(ctx, r.convertedAmount.toFixed(2), colConvX + 4, y - 13, 9);
-    total += r.convertedAmount;
+    drawLine(page, colSumX, y - ROW_H, colSumX, y);
+    drawLine(page, colAttachX, y - ROW_H, colAttachX, y);
+    drawText(ctx, g.description.slice(0, 60), colDescX + 4, y - 13, 9);
+    drawText(ctx, g.sum.toFixed(2), colSumX + 4, y - 13, 9);
+    drawText(ctx, g.pageRange, colAttachX + 4, y - 13, 9);
+    total += g.sum;
     y -= ROW_H;
-    if (y < MARGIN + 160) break;
+  }
+  for (let i = renderedGroups.length; i < minRows; i++) {
+    drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
+    drawLine(page, colSumX, y - ROW_H, colSumX, y);
+    drawLine(page, colAttachX, y - ROW_H, colAttachX, y);
+    y -= ROW_H;
   }
 
   drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
-  drawText(ctx, "TOTAL", colDescX + 4, y - 13, 10, true);
   drawText(
     ctx,
-    `${total.toFixed(2)} ${trip.outputCurrency}`,
-    colConvX + 4,
+    `Total sum in ${trip.outputCurrency}: ${total.toFixed(2)}`,
+    colDescX + 4,
     y - 13,
     10,
     true,
   );
-  y -= ROW_H + 20;
+  y -= ROW_H;
 
-  if (trip.comments && trip.comments.trim()) {
-    drawText(ctx, "Comments:", MARGIN, y, 9, true);
-    y -= 12;
-    const boxH = 60;
-    drawBox(page, MARGIN, y - boxH, PAGE_W - MARGIN * 2, boxH);
-    let cy = y - 12;
+  drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
+  drawText(
+    ctx,
+    `Approved grant in ${trip.outputCurrency}:`,
+    colDescX + 4,
+    y - 13,
+    10,
+    true,
+  );
+  y -= ROW_H + 14;
+
+  // Comments box — always rendered, content from trip.comments only
+  const commentsBoxH = 56;
+  const commentsLabelW = 96;
+  const commentsTop = y;
+  drawBox(page, MARGIN, commentsTop - commentsBoxH, commentsLabelW, commentsBoxH);
+  drawBox(
+    page,
+    MARGIN + commentsLabelW,
+    commentsTop - commentsBoxH,
+    tableW - commentsLabelW,
+    commentsBoxH,
+  );
+  drawText(ctx, "Comments:", MARGIN + 4, commentsTop - 13, 9, true);
+  const commentText = (trip.comments ?? "").trim();
+  if (commentText) {
+    let ccy = commentsTop - 13;
     for (const line of wrap(
-      trip.comments.trim(),
+      commentText,
       ctx.font,
       9,
-      PAGE_W - MARGIN * 2 - 12,
+      tableW - commentsLabelW - 8,
     )) {
-      if (cy < y - boxH + 6) break;
-      drawText(ctx, line, MARGIN + 6, cy, 9);
-      cy -= 11;
+      if (ccy < commentsTop - commentsBoxH + 6) break;
+      drawText(ctx, line, MARGIN + commentsLabelW + 4, ccy, 9);
+      ccy -= 11;
     }
-    y -= boxH + 10;
   }
+  y = commentsTop - commentsBoxH - 6;
 
-  if (trip.recipientEmail) {
-    drawText(ctx, "Claims for reimbursement shall be sent to:", MARGIN, y, 9);
-    y -= 12;
-    drawText(ctx, trip.recipientEmail, MARGIN, y, 10, true);
-    y -= 18;
-  }
+  // Claims-for row
+  drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
+  drawText(
+    ctx,
+    "CLAIMS FOR REIMBURSEMENT SHALL BE SENT TO:",
+    MARGIN + 4,
+    y - 13,
+    9,
+    true,
+  );
+  y -= ROW_H;
+  drawBox(page, MARGIN, y - ROW_H, tableW, ROW_H);
+  drawText(ctx, trip.recipientEmail || "", MARGIN + 4, y - 13, 10);
+  y -= ROW_H;
 
-  drawText(ctx, `Date: ${new Date().toISOString().slice(0, 10)}`, MARGIN, y, 9);
-  drawText(ctx, "Signature:", MARGIN + 200, y, 9);
-  y -= 6;
-
+  // Date / Signature row
+  const dateW = 200;
+  drawBox(page, MARGIN, y - ROW_H * 2, dateW, ROW_H * 2);
+  drawBox(
+    page,
+    MARGIN + dateW,
+    y - ROW_H * 2,
+    tableW - dateW,
+    ROW_H * 2,
+  );
+  drawText(
+    ctx,
+    `Date: ${new Date().toISOString().slice(0, 10)}`,
+    MARGIN + 4,
+    y - 13,
+    9,
+    true,
+  );
+  drawText(ctx, "Your signature:", MARGIN + dateW + 4, y - 13, 9, true);
   if (signatureImg) {
     try {
       const png = await doc.embedPng(signatureImg);
       const sigW = 140;
-      const sigH = (png.height / png.width) * sigW;
+      const sigH = Math.min((png.height / png.width) * sigW, ROW_H * 2 - 6);
+      const sigWAdj = (png.width / png.height) * sigH;
       page.drawImage(png, {
-        x: MARGIN + 250,
-        y: y - sigH,
-        width: sigW,
+        x: MARGIN + dateW + 6,
+        y: y - ROW_H * 2 + 4,
+        width: sigWAdj,
         height: sigH,
       });
-      y -= sigH + 4;
     } catch {
-      y -= 30;
+      // ignore
     }
-  } else {
-    y -= 30;
   }
-
-  drawLine(page, MARGIN + 250, y, MARGIN + 250 + 160, y);
-  y -= 16;
+  y -= ROW_H * 2 + 16;
 
   const accountability =
-    "By submitting this form, I accept full responsibility for the accuracy of the information provided. I confirm the listed expenses were incurred in connection with the stated event and that supporting receipts are attached.";
-  for (const line of wrap(accountability, ctx.font, 8, PAGE_W - MARGIN * 2)) {
-    drawText(ctx, line, MARGIN, y, 8);
+    `By submitting this form, I accept full responsibility for returning any advance reimbursement back to ${trip.organizationName || "the organization"} in case of being unable to attend the activity or failing to deliver required outcomes within 14 days after attending the activity. The refund would be processed no later than 14 days after cancelling my own participation. I understand that unexpected conditions may be covered by a separate insurance for the trip.`;
+  for (const line of wrap(accountability, ctx.font, 9, tableW)) {
+    drawText(ctx, line, MARGIN, y, 9);
     y -= 11;
   }
 }
 
-async function drawReceiptPage(
+function bannerLine(receipt: Receipt, ordinal: number, trip: Trip): string {
+  return `Receipt ${ordinal + 1} - ${receipt.category} - ${receipt.date} - ${fmtMoney(receipt.originalAmount, receipt.originalCurrency)} -> ${fmtMoney(receipt.convertedAmount, trip.outputCurrency)} (rate ${receipt.fxRate.toFixed(4)})`;
+}
+
+function drawBanner(
+  page: PDFPage,
+  font: PDFFont,
+  bold: PDFFont,
+  text: string,
+): void {
+  const w = page.getWidth();
+  const h = page.getHeight();
+  const bannerH = 22;
+  page.drawRectangle({
+    x: 0,
+    y: h - bannerH,
+    width: w,
+    height: bannerH,
+    color: rgb(1, 1, 1),
+    opacity: 0.92,
+    borderColor: rgb(0, 0, 0),
+    borderWidth: 0.5,
+  });
+  drawText({ page, font, bold }, text, 8, h - 15, 9, true);
+}
+
+async function appendImageReceiptPage(
   doc: PDFDocument,
-  ctx: DrawCtx,
+  font: PDFFont,
+  bold: PDFFont,
   receipt: Receipt,
-  index: number,
+  ordinal: number,
   trip: Trip,
 ): Promise<void> {
-  const { page } = ctx;
+  const page = doc.addPage([PAGE_W, PAGE_H]);
+  const ctx: DrawCtx = { page, font, bold };
   let y = PAGE_H - MARGIN;
-  drawText(ctx, `Receipt ${index + 1} — ${receipt.category}`, MARGIN, y, 12, true);
+  drawText(ctx, `Receipt ${ordinal + 1} - ${receipt.category}`, MARGIN, y, 12, true);
   y -= 16;
   drawText(
     ctx,
-    `${receipt.date}  ·  ${fmtMoney(receipt.originalAmount, receipt.originalCurrency)}  →  ${fmtMoney(receipt.convertedAmount, trip.outputCurrency)}  (rate ${receipt.fxRate.toFixed(4)})`,
+    `${receipt.date}  ·  ${fmtMoney(receipt.originalAmount, receipt.originalCurrency)}  ->  ${fmtMoney(receipt.convertedAmount, trip.outputCurrency)}  (rate ${receipt.fxRate.toFixed(4)})`,
     MARGIN,
     y,
     9,
   );
   y -= 14;
   if (receipt.description) {
-    for (const line of wrap(receipt.description, ctx.font, 9, PAGE_W - MARGIN * 2)) {
+    for (const line of wrap(receipt.description, font, 9, PAGE_W - MARGIN * 2)) {
       drawText(ctx, line, MARGIN, y, 9);
       y -= 11;
     }
@@ -316,6 +512,30 @@ async function drawReceiptPage(
   page.drawImage(img, { x: MARGIN + (maxW - w) / 2, y: y - h, width: w, height: h });
 }
 
+async function appendPdfReceipt(
+  doc: PDFDocument,
+  font: PDFFont,
+  bold: PDFFont,
+  receipt: Receipt,
+  ordinal: number,
+  trip: Trip,
+): Promise<number> {
+  const buf = new Uint8Array(await receipt.imageBlob.arrayBuffer());
+  try {
+    const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+    const indices = src.getPageIndices();
+    const copied = await doc.copyPages(src, indices);
+    copied.forEach((p, i) => {
+      doc.addPage(p);
+      if (i === 0) drawBanner(p, font, bold, bannerLine(receipt, ordinal, trip));
+    });
+    return copied.length;
+  } catch {
+    await appendImageReceiptPage(doc, font, bold, receipt, ordinal, trip);
+    return 1;
+  }
+}
+
 function dataUrlToBytes(dataUrl: string): Uint8Array | null {
   const m = /^data:[^;]+;base64,(.+)$/.exec(dataUrl);
   if (!m) return null;
@@ -338,12 +558,33 @@ export async function generatePdf(
     ? dataUrlToBytes(identity.signaturePng)
     : null;
 
-  const cover = doc.addPage([PAGE_W, PAGE_H]);
-  await drawCover(doc, { page: cover, font, bold }, identity, trip, receipts, sigBytes);
+  const pageCounts = new Map<string, number>();
+  await Promise.all(
+    receipts.map(async (r) => {
+      pageCounts.set(r.id, await countReceiptPages(r));
+    }),
+  );
 
-  for (let i = 0; i < receipts.length; i++) {
-    const page = doc.addPage([PAGE_W, PAGE_H]);
-    await drawReceiptPage(doc, { page, font, bold }, receipts[i], i, trip);
+  const cover = doc.addPage([PAGE_W, PAGE_H]);
+  await drawCover(
+    doc,
+    { page: cover, font, bold },
+    identity,
+    trip,
+    receipts,
+    sigBytes,
+    pageCounts,
+  );
+
+  const orderedGroups = buildGroups(trip, receipts, pageCounts);
+  const ordered = orderedGroups.flatMap((g) => g.receipts);
+  for (let i = 0; i < ordered.length; i++) {
+    const r = ordered[i];
+    if (r.imageType === "application/pdf") {
+      await appendPdfReceipt(doc, font, bold, r, i, trip);
+    } else {
+      await appendImageReceiptPage(doc, font, bold, r, i, trip);
+    }
   }
 
   return doc.save();

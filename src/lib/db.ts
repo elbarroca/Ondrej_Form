@@ -11,6 +11,10 @@ class AppDB extends Dexie {
       trips: "id, createdAt, eventName",
       receipts: "id, tripId, date, category, createdAt",
     });
+    this.version(2).stores({
+      trips: "id, createdAt, eventName, catalogId, submittedAt",
+      receipts: "id, tripId, date, category, createdAt",
+    });
   }
 }
 

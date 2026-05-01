@@ -45,6 +45,7 @@ export interface Trip {
   comments?: string;
   submittedAt?: number;
   createdAt: number;
+  categoryDescriptions?: Partial<Record<ReceiptCategory, string>>;
 }
 
 export interface CatalogEvent {

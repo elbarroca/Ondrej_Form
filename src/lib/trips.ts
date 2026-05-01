@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { getCatalogEvent } from "./catalog";
-import type { Receipt, Trip } from "./types";
+import { convert, getRate } from "./fx";
+import type { Receipt, ReceiptCategory, Trip } from "./types";
 
 function uid(): string {
   return crypto.randomUUID();
@@ -74,5 +75,81 @@ export async function activateCatalogTrip(catalogId: string): Promise<Trip> {
 export async function markSubmitted(id: string, submitted: boolean): Promise<void> {
   await db.trips.update(id, {
     submittedAt: submitted ? Date.now() : undefined,
+  });
+}
+
+export async function setCategoryDescription(
+  tripId: string,
+  category: ReceiptCategory,
+  description: string,
+): Promise<void> {
+  const trip = await db.trips.get(tripId);
+  if (!trip) return;
+  const map: Partial<Record<ReceiptCategory, string>> = {
+    ...(trip.categoryDescriptions ?? {}),
+  };
+  const trimmed = description.trim();
+  if (trimmed) map[category] = trimmed;
+  else delete map[category];
+  await db.trips.update(tripId, { categoryDescriptions: map });
+}
+
+export async function updateReceipt(
+  id: string,
+  patch: Partial<Omit<Receipt, "id" | "tripId" | "imageBlob" | "imageType" | "createdAt">>,
+): Promise<void> {
+  await db.receipts.update(id, patch);
+}
+
+export interface BulkCurrencyResult {
+  updated: number;
+  failed: number;
+}
+
+export async function changeCategoryCurrency(
+  tripId: string,
+  category: ReceiptCategory,
+  newCurrency: string,
+): Promise<BulkCurrencyResult> {
+  const trip = await db.trips.get(tripId);
+  if (!trip) return { updated: 0, failed: 0 };
+  const receipts = await db.receipts
+    .where("tripId")
+    .equals(tripId)
+    .filter((r) => r.category === category)
+    .toArray();
+  let updated = 0;
+  let failed = 0;
+  for (const r of receipts) {
+    if (r.originalCurrency === newCurrency) {
+      updated++;
+      continue;
+    }
+    try {
+      const fx = await getRate(r.date, newCurrency, trip.outputCurrency);
+      await db.receipts.update(r.id, {
+        originalCurrency: newCurrency,
+        convertedAmount: convert(r.originalAmount, fx.rate),
+        fxRate: fx.rate,
+        fxFetchedAt: fx.fetchedAt,
+      });
+      updated++;
+    } catch {
+      failed++;
+    }
+  }
+  return { updated, failed };
+}
+
+export async function refreshReceiptFx(receiptId: string): Promise<void> {
+  const r = await db.receipts.get(receiptId);
+  if (!r) return;
+  const trip = await db.trips.get(r.tripId);
+  if (!trip) return;
+  const fx = await getRate(r.date, r.originalCurrency, trip.outputCurrency);
+  await db.receipts.update(r.id, {
+    convertedAmount: convert(r.originalAmount, fx.rate),
+    fxRate: fx.rate,
+    fxFetchedAt: fx.fetchedAt,
   });
 }

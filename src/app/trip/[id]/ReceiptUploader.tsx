@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getRate, convert } from "@/lib/fx";
 import { addReceipt } from "@/lib/trips";
 import type { ReceiptCategory, Trip } from "@/lib/types";
@@ -15,6 +15,7 @@ interface PendingFile {
   category: ReceiptCategory;
   description: string;
   preview: string;
+  isPdf: boolean;
   saving: boolean;
   error?: string;
   previewRate?: number;
@@ -33,6 +34,8 @@ function todayISO(): string {
 export function ReceiptUploader({ trip }: { trip: Trip }) {
   const [pending, setPending] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [pasteHint, setPasteHint] = useState(false);
+  const dropRef = useRef<HTMLDivElement | null>(null);
 
   const addFiles = (files: FileList | File[]) => {
     const next: PendingFile[] = [];
@@ -43,6 +46,7 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
       ) {
         continue;
       }
+      const isPdf = file.type === "application/pdf";
       next.push({
         id: uid(),
         file,
@@ -51,12 +55,54 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
         date: todayISO(),
         category: "Other",
         description: "",
-        preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
+        preview: URL.createObjectURL(file),
+        isPdf,
         saving: false,
       });
     }
     setPending((prev) => [...prev, ...next]);
   };
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const files: File[] = [];
+      const stamp = Date.now();
+      for (const item of Array.from(e.clipboardData.items)) {
+        if (item.kind !== "file") continue;
+        const f = item.getAsFile();
+        if (!f) continue;
+        if (
+          !f.type.startsWith("image/") &&
+          f.type !== "application/pdf"
+        ) {
+          continue;
+        }
+        const ext = f.type.split("/")[1] ?? "png";
+        const named = f.name
+          ? f
+          : new File([f], `pasted-${stamp}.${ext}`, { type: f.type });
+        files.push(named);
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        addFiles(files);
+        setPasteHint(true);
+        setTimeout(() => setPasteHint(false), 1500);
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -163,6 +209,8 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
   return (
     <section className="flex flex-col gap-4">
       <div
+        ref={dropRef}
+        tabIndex={0}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -173,14 +221,16 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
           setDragOver(false);
           if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
         }}
-        className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition ${
+        className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center outline-none transition focus-visible:border-ink ${
           dragOver
             ? "border-ink bg-line/40"
             : "border-line bg-paper hover:border-ink/60"
         }`}
       >
         <p className="text-sm font-medium">Drop receipts (images or PDFs)</p>
-        <p className="mt-1 text-xs text-mute">or</p>
+        <p className="mt-1 text-xs text-mute">
+          or paste from clipboard (⌘V / Ctrl+V) — or
+        </p>
         <label className="btn-ghost mt-3 cursor-pointer">
           Choose files
           <input
@@ -194,6 +244,9 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
             }}
           />
         </label>
+        {pasteHint && (
+          <p className="mt-2 text-xs text-emerald-700">Pasted ✓</p>
+        )}
       </div>
 
       {pending.length > 0 && (
@@ -203,17 +256,31 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
               key={p.id}
               className="card grid gap-3 sm:grid-cols-[120px_1fr]"
             >
-              {p.preview ? (
+              {p.isPdf ? (
+                <a
+                  href={p.preview}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="relative block h-32 w-full overflow-hidden rounded-md border border-line bg-white sm:h-full sm:min-h-[160px]"
+                  title="Open PDF"
+                >
+                  <object
+                    data={`${p.preview}#toolbar=0&navpanes=0&view=FitH`}
+                    type="application/pdf"
+                    aria-label="PDF preview"
+                    className="pointer-events-none h-[320px] w-full origin-top-left scale-[0.5]"
+                  />
+                  <span className="absolute right-1 top-1 rounded bg-ink/85 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-paper">
+                    PDF
+                  </span>
+                </a>
+              ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={p.preview}
                   alt="preview"
                   className="h-24 w-full rounded-md object-cover sm:h-full"
                 />
-              ) : (
-                <div className="flex h-24 w-full items-center justify-center rounded-md border border-line bg-paper text-xs text-mute sm:h-full">
-                  PDF
-                </div>
               )}
               <div className="grid gap-2 sm:grid-cols-3">
                 <div className="field">

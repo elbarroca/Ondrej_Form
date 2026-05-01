@@ -21,9 +21,30 @@ export function ReceiptThumb({ blob, type }: { blob: Blob; type: string }) {
       />
     );
   }
+  if (type === "application/pdf") {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="group relative block h-32 w-full overflow-hidden rounded-md border border-line bg-white"
+        title="Open PDF"
+      >
+        <object
+          data={`${url}#toolbar=0&navpanes=0&view=FitH`}
+          type="application/pdf"
+          aria-label="PDF preview"
+          className="pointer-events-none h-[260px] w-full origin-top-left scale-[0.5]"
+        />
+        <span className="absolute right-1 top-1 rounded bg-ink/85 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-paper">
+          PDF
+        </span>
+      </a>
+    );
+  }
   return (
     <div className="flex h-32 w-full items-center justify-center rounded-md border border-line bg-paper text-xs text-mute">
-      PDF receipt
+      Receipt
     </div>
   );
 }

@@ -2,13 +2,21 @@
 
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { db } from "@/lib/db";
 import { loadIdentity } from "@/lib/identity";
 import { generatePdf, downloadPdf } from "@/lib/pdf";
-import { deleteReceipt, markSubmitted, updateTrip } from "@/lib/trips";
-import type { ReceiptCategory, Trip } from "@/lib/types";
-import { RECEIPT_CATEGORIES } from "@/lib/types";
+import {
+  changeCategoryCurrency,
+  deleteReceipt,
+  markSubmitted,
+  refreshReceiptFx,
+  setCategoryDescription,
+  updateReceipt,
+  updateTrip,
+} from "@/lib/trips";
+import type { Receipt, ReceiptCategory, Trip } from "@/lib/types";
+import { CURRENCIES, RECEIPT_CATEGORIES } from "@/lib/types";
 import { ReceiptUploader } from "./ReceiptUploader";
 import { ReceiptThumb } from "./ReceiptThumb";
 
@@ -190,7 +198,7 @@ export function TripView({ tripId }: { tripId: string }) {
 
       <ReceiptUploader trip={trip} />
 
-      <section className="flex flex-col gap-3">
+      <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Receipts</h2>
           <div className="flex flex-wrap gap-1">
@@ -210,48 +218,16 @@ export function TripView({ tripId }: { tripId: string }) {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {(receipts ?? []).length === 0 ? (
           <div className="card text-sm text-mute">
             No receipts yet. Drop images or PDFs above to add them.
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {filtered.map((r) => (
-              <li key={r.id} className="card flex flex-col gap-3">
-                <ReceiptThumb blob={r.imageBlob} type={r.imageType} />
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {r.description || "(no description)"}
-                    </p>
-                    <p className="text-xs text-mute">
-                      {r.date} · {r.category}
-                    </p>
-                  </div>
-                  <div className="text-right text-xs">
-                    <p className="font-mono">
-                      {r.originalAmount.toFixed(2)} {r.originalCurrency}
-                    </p>
-                    <p className="font-mono font-semibold">
-                      → {r.convertedAmount.toFixed(2)} {trip.outputCurrency}
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-mute">
-                      rate {r.fxRate.toFixed(4)}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (confirm("Delete this receipt?"))
-                      void deleteReceipt(r.id);
-                  }}
-                  className="self-end text-xs text-red-600 hover:underline"
-                >
-                  delete
-                </button>
-              </li>
-            ))}
-          </ul>
+          <CategoryGroups
+            trip={trip}
+            receipts={filtered}
+            filter={filter}
+          />
         )}
       </section>
 
@@ -261,7 +237,7 @@ export function TripView({ tripId }: { tripId: string }) {
             Totals
           </h2>
         </div>
-        {RECEIPT_CATEGORIES.map((c) => (
+        {RECEIPT_CATEGORIES.filter((c) => (totals.byCat[c] ?? 0) > 0).map((c) => (
           <div key={c} className="flex items-center justify-between text-sm">
             <span className="text-mute">{c}</span>
             <span className="font-mono">
@@ -290,14 +266,44 @@ export function TripView({ tripId }: { tripId: string }) {
 
 function CommentsBlock({ trip }: { trip: Trip }) {
   const [value, setValue] = useState(trip.comments ?? "");
-  const [saved, setSaved] = useState(false);
-  const dirty = value !== (trip.comments ?? "");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const persisted = trip.comments ?? "";
+  const dirty = value !== persisted;
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const save = async () => {
-    await updateTrip(trip.id, { comments: value });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1200);
+  useEffect(() => {
+    if (!dirty) return;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setStatus("saving");
+      void updateTrip(trip.id, { comments: value }).then(() => {
+        setStatus("saved");
+        setTimeout(() => setStatus("idle"), 1200);
+      });
+    }, 400);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [value, dirty, trip.id]);
+
+  const flushNow = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (!dirty) return;
+    setStatus("saving");
+    void updateTrip(trip.id, { comments: value }).then(() => {
+      setStatus("saved");
+      setTimeout(() => setStatus("idle"), 1200);
+    });
   };
+
+  const indicator =
+    status === "saving"
+      ? "Saving..."
+      : status === "saved"
+        ? "Saved ✓"
+        : dirty
+          ? "Unsaved"
+          : "";
 
   return (
     <section className="card flex flex-col gap-3">
@@ -305,23 +311,25 @@ function CommentsBlock({ trip }: { trip: Trip }) {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-mute">
           Comments / notes for reviewer
         </h2>
-        {saved && <span className="text-xs text-emerald-700">Saved ✓</span>}
+        <span
+          className={`text-xs ${
+            status === "saved"
+              ? "text-emerald-700"
+              : dirty
+                ? "text-amber-700"
+                : "text-mute"
+          }`}
+        >
+          {indicator || "Auto-saves"}
+        </span>
       </div>
       <textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        onBlur={flushNow}
         placeholder="Anything you want to flag to the reviewer — e.g. flight changes, missing receipt explanations, currency notes..."
         className="min-h-[120px] w-full rounded-md border border-line bg-paper px-3 py-2 text-sm outline-none transition focus:border-ink"
       />
-      <div className="flex justify-end">
-        <button
-          onClick={save}
-          disabled={!dirty}
-          className="btn"
-        >
-          Save comments
-        </button>
-      </div>
     </section>
   );
 }
@@ -378,5 +386,369 @@ function EditTripPanel({ trip }: { trip: Trip }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function CategoryGroups({
+  trip,
+  receipts,
+  filter,
+}: {
+  trip: Trip;
+  receipts: Receipt[];
+  filter: "All" | ReceiptCategory;
+}) {
+  const visibleCats = useMemo(() => {
+    if (filter !== "All") return [filter];
+    return RECEIPT_CATEGORIES.filter((c) =>
+      receipts.some((r) => r.category === c),
+    );
+  }, [filter, receipts]);
+
+  if (visibleCats.length === 0) {
+    return (
+      <div className="card text-sm text-mute">
+        No receipts in this category yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {visibleCats.map((cat) => {
+        const items = receipts.filter((r) => r.category === cat);
+        return (
+          <CategoryBlock
+            key={cat}
+            trip={trip}
+            category={cat}
+            receipts={items}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function CategoryBlock({
+  trip,
+  category,
+  receipts,
+}: {
+  trip: Trip;
+  category: ReceiptCategory;
+  receipts: Receipt[];
+}) {
+  const sum = receipts.reduce((s, r) => s + r.convertedAmount, 0);
+  const currencies = Array.from(new Set(receipts.map((r) => r.originalCurrency)));
+  const dominantCurrency =
+    currencies.length === 1 ? currencies[0] : currencies[0] ?? trip.outputCurrency;
+
+  return (
+    <section className="card flex flex-col gap-4 p-4 sm:p-5">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-3">
+        <div className="flex items-baseline gap-3">
+          <h3 className="text-base font-semibold">{category}</h3>
+          <span className="text-xs text-mute">
+            {receipts.length} {receipts.length === 1 ? "receipt" : "receipts"}
+          </span>
+        </div>
+        <div className="text-right">
+          <p className="font-mono text-sm font-semibold">
+            {sum.toFixed(2)} {trip.outputCurrency}
+          </p>
+          {currencies.length === 1 && currencies[0] !== trip.outputCurrency && (
+            <p className="text-[10px] text-mute">all in {currencies[0]}</p>
+          )}
+          {currencies.length > 1 && (
+            <p className="text-[10px] text-mute">
+              mixed: {currencies.join(", ")}
+            </p>
+          )}
+        </div>
+      </header>
+
+      <BulkPanel
+        trip={trip}
+        category={category}
+        receipts={receipts}
+        suggestedCurrency={dominantCurrency}
+      />
+
+      <ul className="grid gap-3 sm:grid-cols-2">
+        {receipts.map((r) => (
+          <ReceiptCard
+            key={r.id}
+            receipt={r}
+            outputCurrency={trip.outputCurrency}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function BulkPanel({
+  trip,
+  category,
+  receipts,
+  suggestedCurrency,
+}: {
+  trip: Trip;
+  category: ReceiptCategory;
+  receipts: Receipt[];
+  suggestedCurrency: string;
+}) {
+  const initialDesc = trip.categoryDescriptions?.[category] ?? "";
+  const [desc, setDesc] = useState(initialDesc);
+  const [savingDesc, setSavingDesc] = useState(false);
+  const [descSaved, setDescSaved] = useState(false);
+
+  const [bulkCurrency, setBulkCurrency] = useState(suggestedCurrency);
+  const [applying, setApplying] = useState(false);
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
+
+  const dirtyDesc = desc !== initialDesc;
+
+  const saveDesc = async () => {
+    setSavingDesc(true);
+    try {
+      await setCategoryDescription(trip.id, category, desc);
+      setDescSaved(true);
+      setTimeout(() => setDescSaved(false), 1200);
+    } finally {
+      setSavingDesc(false);
+    }
+  };
+
+  const applyCurrency = async () => {
+    if (receipts.length === 0) return;
+    setApplying(true);
+    setApplyMsg(null);
+    try {
+      const res = await changeCategoryCurrency(trip.id, category, bulkCurrency);
+      setApplyMsg(
+        res.failed === 0
+          ? `Updated ${res.updated} receipts to ${bulkCurrency}.`
+          : `Updated ${res.updated}, ${res.failed} failed (rate fetch).`,
+      );
+      setTimeout(() => setApplyMsg(null), 2400);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-3 rounded-md border border-line bg-paper/60 p-3 sm:grid-cols-[1fr_auto] sm:gap-4">
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] font-medium uppercase tracking-wide text-mute">
+          Group description (one line for the whole category)
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            placeholder={`e.g. 4 international lunches/dinners`}
+            className="min-w-0 flex-1 rounded-md border border-line bg-paper px-3 py-1.5 text-sm outline-none focus:border-ink"
+          />
+          <button
+            type="button"
+            onClick={saveDesc}
+            disabled={!dirtyDesc || savingDesc}
+            className="btn-ghost text-xs"
+          >
+            {savingDesc ? "..." : descSaved ? "Saved ✓" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] font-medium uppercase tracking-wide text-mute">
+          Bulk currency
+        </label>
+        <div className="flex items-center gap-2">
+          <select
+            value={bulkCurrency}
+            onChange={(e) => setBulkCurrency(e.target.value)}
+            className="rounded-md border border-line bg-paper px-2 py-1.5 text-sm outline-none focus:border-ink"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={applyCurrency}
+            disabled={applying || receipts.length === 0}
+            className="btn-ghost text-xs"
+            title={`Re-apply FX for all ${category} receipts using ${bulkCurrency}`}
+          >
+            {applying ? "Applying..." : "Apply to all"}
+          </button>
+        </div>
+        {applyMsg && (
+          <p className="text-[10px] text-emerald-700">{applyMsg}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReceiptCard({
+  receipt,
+  outputCurrency,
+}: {
+  receipt: Receipt;
+  outputCurrency: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [desc, setDesc] = useState(receipt.description);
+  const [amount, setAmount] = useState(String(receipt.originalAmount));
+  const [currency, setCurrency] = useState(receipt.originalCurrency);
+  const [date, setDate] = useState(receipt.date);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const amt = Number(amount);
+      const fields: Parameters<typeof updateReceipt>[1] = {
+        description: desc.trim(),
+        date,
+      };
+      const currencyChanged = currency !== receipt.originalCurrency;
+      const amountChanged = !Number.isNaN(amt) && amt !== receipt.originalAmount;
+      const dateChanged = date !== receipt.date;
+      if (amountChanged) fields.originalAmount = amt;
+      if (currencyChanged) fields.originalCurrency = currency;
+      await updateReceipt(receipt.id, fields);
+      if (currencyChanged || dateChanged || amountChanged) {
+        await refreshReceiptFx(receipt.id);
+      }
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="card flex flex-col gap-3 p-4">
+      <ReceiptThumb blob={receipt.imageBlob} type={receipt.imageType} />
+      {!editing ? (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-sm font-semibold">
+                {receipt.originalAmount.toFixed(2)} {receipt.originalCurrency}
+              </p>
+              <p className="text-[11px] text-mute">{receipt.date}</p>
+              {receipt.description && (
+                <p className="mt-1 truncate text-xs">{receipt.description}</p>
+              )}
+            </div>
+            <div className="text-right">
+              <p className="font-mono text-sm font-semibold">
+                {receipt.convertedAmount.toFixed(2)} {outputCurrency}
+              </p>
+              <p className="text-[10px] text-mute">
+                rate {receipt.fxRate.toFixed(4)}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setDesc(receipt.description);
+                setAmount(String(receipt.originalAmount));
+                setCurrency(receipt.originalCurrency);
+                setDate(receipt.date);
+                setEditing(true);
+              }}
+              className="text-ink hover:underline"
+            >
+              edit
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm("Delete this receipt?"))
+                  void deleteReceipt(receipt.id);
+              }}
+              className="text-red-600 hover:underline"
+            >
+              delete
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="grid gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="field">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-mute">
+                Amount
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-mute">
+                Currency
+              </span>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="field">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-mute">
+              Date
+            </span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-mute">
+              Description (overrides group description on the per-receipt page)
+            </span>
+            <input
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder="optional"
+            />
+          </label>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="btn-ghost text-xs"
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              className="btn text-xs"
+              disabled={busy}
+            >
+              {busy ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
