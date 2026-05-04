@@ -1,52 +1,66 @@
-import { mergeProps } from "@base-ui/react/merge-props"
-import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
-
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
+  "inline-flex items-center gap-[5px] rounded-full border px-[9px] py-[3px] text-[11.5px] font-semibold w-fit",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        draft:
+          "bg-[rgba(148,163,184,0.12)] text-[#475569] border-[rgba(148,163,184,0.25)]",
+        submitted:
+          "bg-[rgba(245,158,11,0.10)] text-[#b45309] border-[rgba(245,158,11,0.25)]",
+        approved:
+          "bg-[rgba(16,185,129,0.10)] text-[#047857] border-[rgba(16,185,129,0.25)]",
+        rejected:
+          "bg-[rgba(239,68,68,0.10)] text-[#b91c1c] border-[rgba(239,68,68,0.25)]",
+        neutral:
+          "bg-paper text-mute border-line",
+        brand:
+          "bg-brand/8 text-brand border-brand/25",
         secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
+          "bg-secondary text-secondary-foreground border-transparent",
+        default:
+          "bg-primary text-primary-foreground border-transparent",
         outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
-        ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
-        link: "text-primary underline-offset-4 hover:underline",
+          "border-border text-foreground",
       },
     },
     defaultVariants: {
-      variant: "default",
+      variant: "neutral",
     },
   }
 )
 
-function Badge({
-  className,
-  variant = "default",
-  render,
-  ...props
-}: useRender.ComponentProps<"span"> & VariantProps<typeof badgeVariants>) {
-  return useRender({
-    defaultTagName: "span",
-    props: mergeProps<"span">(
-      {
-        className: cn(badgeVariants({ variant }), className),
-      },
-      props
-    ),
-    render,
-    state: {
-      slot: "badge",
-      variant,
-    },
-  })
+type BadgeProps = VariantProps<typeof badgeVariants> & {
+  withDot?: boolean
+  label?: string
+  children?: React.ReactNode
+  className?: string
 }
 
-export { Badge, badgeVariants }
+function Badge({ variant = "neutral", withDot, label, children, className }: BadgeProps) {
+  const labelMap: Record<string, string> = {
+    draft: "Draft",
+    submitted: "Submitted",
+    approved: "Approved",
+    rejected: "Rejected",
+  }
+
+  return (
+    <span
+      role="status"
+      className={cn(badgeVariants({ variant }), className)}
+    >
+      {withDot && (
+        <span
+          className="size-[5px] rounded-full bg-current"
+          aria-hidden="true"
+        />
+      )}
+      {children || label || (variant && labelMap[variant])}
+    </span>
+  )
+}
+
+export { Badge, badgeVariants, type BadgeProps }

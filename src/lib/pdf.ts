@@ -8,12 +8,13 @@ import {
 import type { Identity, Receipt, ReceiptCategory, Trip } from "./types";
 
 const CATEGORY_ORDER: ReceiptCategory[] = [
-  "Flights",
-  "Lodging",
-  "Transport",
-  "Meals",
-  "Materials",
-  "Other",
+  "travel",
+  "lodging",
+  "meals",
+  "conferences",
+  "supplies",
+  "translation",
+  "other",
 ];
 
 interface CategoryGroup {

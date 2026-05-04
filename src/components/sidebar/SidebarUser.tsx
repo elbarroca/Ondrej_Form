@@ -56,8 +56,8 @@ export function SidebarUser({ collapsed }: SidebarUserProps) {
                     {displayName}
                   </span>
                   <Badge
-                    variant="secondary"
-                    className="mt-0.5 text-[10px] px-1.5 py-0 bg-blue-600/10 text-blue-600 hover:bg-blue-600/10"
+                    variant="neutral"
+                    className="mt-0.5 text-[10px] px-1.5 py-0 bg-blue-600/10 text-blue-600"
                   >
                     {roleLabel}
                   </Badge>

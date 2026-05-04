@@ -53,7 +53,7 @@ export function ReceiptUploader({ trip }: { trip: Trip }) {
         amount: "",
         currency: "EUR",
         date: todayISO(),
-        category: "Other",
+        category: "other",
         description: "",
         preview: URL.createObjectURL(file),
         isPdf,

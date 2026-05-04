@@ -3,24 +3,30 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { getPendingApprovals, getApprovedAgreements, getRejectedAgreements } from "@/lib/auth/mockData";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  getPendingApprovals,
+  getApprovedAgreements,
+  getRejectedAgreements,
+} from "@/lib/auth/mockData";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ApprovalRow } from "@/components/ui/approval-row";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { Drawer } from "@/components/ui/drawer";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { CheckCircleIcon, FileTextIcon } from "lucide-react";
 import type { Agreement } from "@/lib/auth/types";
-
-const STATUS_CONFIG: Record<Agreement["status"], { label: string; className: string }> = {
-  draft: { label: "Draft", className: "bg-blue-100 text-blue-700 border-blue-200" },
-  submitted: { label: "Submitted", className: "bg-amber-100 text-amber-700 border-amber-200" },
-  approved: { label: "Approved", className: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  rejected: { label: "Rejected", className: "bg-red-100 text-red-700 border-red-200" },
-};
+import type { ReportStatus } from "@/lib/types";
 
 export default function ApprovalsPage() {
-  const { user, canApprove } = useAuth();
+  const { canApprove } = useAuth();
   const [pending, setPending] = useState<Agreement[]>([]);
   const [approved, setApproved] = useState<Agreement[]>([]);
   const [rejected, setRejected] = useState<Agreement[]>([]);
+  const [tab, setTab] = useState<"pending" | "approved" | "rejected">("pending");
+  const [selected, setSelected] = useState<Agreement | null>(null);
+  const [comment, setComment] = useState("");
 
   useEffect(() => {
     if (!canApprove) return;
@@ -31,170 +37,209 @@ export default function ApprovalsPage() {
 
   if (!canApprove) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-7">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Review and manage agreement approvals</p>
+          <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Approvals</h1>
+          <p className="mt-1.5 text-sm text-mute">Review and manage approvals</p>
         </div>
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-14 text-center">
-            <p className="text-sm font-medium">Access denied</p>
-            <p className="mt-1 text-xs text-muted-foreground">You do not have permission to view this page</p>
-          </CardContent>
-        </Card>
+        <div className="rounded-[14px] border border-line bg-white">
+          <EmptyState
+            icon={<CheckCircleIcon className="size-12" />}
+            headline="Access denied"
+            helper="You do not have permission to view this page"
+          />
+        </div>
       </div>
     );
   }
 
+  const items = tab === "pending" ? pending : tab === "approved" ? approved : rejected;
+
+  const pills = [
+    { key: "pending", label: "Pending", count: pending.length, active: tab === "pending" },
+    { key: "approved", label: "Approved", count: approved.length, active: tab === "approved" },
+    { key: "rejected", label: "Rejected", count: rejected.length, active: tab === "rejected" },
+  ];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Review and manage agreement approvals</p>
+        <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Approvals</h1>
+        <p className="mt-1.5 text-sm text-mute">Review and manage agreement approvals</p>
       </div>
 
-      <Tabs defaultValue="pending">
-        <TabsList>
-          <TabsTrigger value="pending">
-            Pending
-            {pending.length > 0 && (
-              <span className="ml-1.5 rounded-full bg-brand text-white px-1.5 py-0.5 text-xs">
-                {pending.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="approved">Approved</TabsTrigger>
-          <TabsTrigger value="rejected">Rejected</TabsTrigger>
-        </TabsList>
+      <FilterBar
+        pills={pills}
+        onPillClick={(key) => setTab(key as typeof tab)}
+      />
 
-        <TabsContent value="pending" className="mt-4 space-y-4">
-          {pending.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
-                <div className="mb-4 grid h-12 w-12 place-items-center rounded-full bg-muted">
-                  <svg className="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+      {items.length === 0 ? (
+        <div className="rounded-[14px] border border-line bg-white">
+          <EmptyState
+            icon={<CheckCircleIcon className="size-12" />}
+            headline={tab === "pending" ? "Nothing waiting on you" : `No ${tab} approvals`}
+            helper={tab === "pending" ? "All reports have been reviewed" : ""}
+          />
+        </div>
+      ) : (
+        <div className="rounded-[14px] border border-line bg-white overflow-hidden">
+          {items.map((a) => (
+            <ApprovalRow
+              key={a.id}
+              submitterName={a.submitterName}
+              submitterInitials={a.submitterName
+                .split(" ")
+                .map((n) => n[0])
+                .join("")
+                .slice(0, 2)}
+              amount={`${a.currency} ${a.total.toLocaleString()}`}
+              title={a.title}
+              when={a.createdAt}
+              onClick={() => setSelected(a)}
+              onApprove={
+                tab === "pending"
+                  ? () => {
+                      setSelected(a);
+                    }
+                  : undefined
+              }
+              onReject={
+                tab === "pending"
+                  ? () => {
+                      setSelected(a);
+                    }
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Approval drawer */}
+      <Drawer
+        open={!!selected}
+        onClose={() => {
+          setSelected(null);
+          setComment("");
+        }}
+        title={selected?.title ?? "Review report"}
+        footer={
+          tab === "pending" ? (
+            <>
+              <div>
+                <Button
+                  variant="mini"
+                  size="sm"
+                  miniVariant="danger"
+                  onClick={() => setSelected(null)}
+                >
+                  Reject
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm">
+                  Approve
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1" />
+          )
+        }
+      >
+        {selected && (
+          <div className="space-y-5">
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-8 w-8 rounded-full bg-brand/10 text-brand grid place-items-center text-xs font-semibold">
+                  {selected.submitterName
+                    .split(" ")
+                    .map((n) => n[0])
+                    .join("")
+                    .slice(0, 2)}
                 </div>
-                <p className="text-sm font-medium">No pending approvals</p>
-                <p className="mt-1 text-xs text-muted-foreground">All agreements have been reviewed</p>
-              </CardContent>
-            </Card>
-          ) : (
-            pending.map(a => {
-              const submittedAct = a.activities.find(x => x.type === "submitted");
-              return (
-                <Card key={a.id}>
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <Link href={`/dashboard/agreements/${a.id}`} className="text-sm font-semibold hover:text-brand">
-                            {a.title}
-                          </Link>
-                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_CONFIG[a.status].className}`}>
-                            {STATUS_CONFIG[a.status].label}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {a.submitterName} · {a.currency} {a.total.toLocaleString()}
-                        </p>
-                        {submittedAct && (
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            Submitted {new Date(submittedAct.timestamp).toLocaleDateString("en-GB")}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <Link href={`/dashboard/agreements/${a.id}`}>
-                          <Button size="sm" variant="outline">Review</Button>
-                        </Link>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </TabsContent>
+                <div>
+                  <p className="text-[13px] font-semibold">{selected.submitterName}</p>
+                  <p className="text-[12px] text-mute">{selected.createdAt}</p>
+                </div>
+                <Badge
+                  variant={selected.status as ReportStatus}
+                  withDot
+                  className="ml-auto"
+                >
+                  {selected.status.charAt(0).toUpperCase() +
+                    selected.status.slice(1)}
+                </Badge>
+              </div>
 
-        <TabsContent value="approved" className="mt-4 space-y-3">
-          {approved.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
-                <p className="text-sm font-medium">No approved agreements</p>
-                <p className="mt-1 text-xs text-muted-foreground">Approved agreements will appear here</p>
-              </CardContent>
-            </Card>
-          ) : (
-            approved.map(a => (
-              <Card key={a.id}>
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <Link href={`/dashboard/agreements/${a.id}`} className="text-sm font-semibold hover:text-brand">
-                          {a.title}
-                        </Link>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_CONFIG.approved.className}`}>
-                          Approved
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {a.submitterName} · {a.currency} {a.total.toLocaleString()}
+              <div className="text-right mb-4">
+                <p className="text-[11.5px] text-mute uppercase tracking-[.08em]">
+                  Total
+                </p>
+                <p className="text-[28px] font-semibold tabular-nums tracking-[-0.015em] mt-1">
+                  {selected.currency} {selected.total.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Receivables */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Receipts</h4>
+              <div className="space-y-2">
+                {selected.receivables.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between rounded-[10px] border border-line px-3 py-2.5"
+                  >
+                    <div>
+                      <p className="text-[13px] font-medium">{r.description}</p>
+                      <p className="text-[12px] text-mute">
+                        {r.category} · {r.date}
                       </p>
                     </div>
-                    <Link href={`/dashboard/agreements/${a.id}`}>
-                      <Button size="sm" variant="ghost">View</Button>
-                    </Link>
+                    <p className="text-[13px] font-semibold tabular-nums">
+                      {selected.currency} {r.amount.toLocaleString()}
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </TabsContent>
+                ))}
+              </div>
+            </div>
 
-        <TabsContent value="rejected" className="mt-4 space-y-3">
-          {rejected.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
-                <p className="text-sm font-medium">No rejected agreements</p>
-                <p className="mt-1 text-xs text-muted-foreground">Rejected agreements will appear here</p>
-              </CardContent>
-            </Card>
-          ) : (
-            rejected.map(a => (
-              <Card key={a.id}>
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <Link href={`/dashboard/agreements/${a.id}`} className="text-sm font-semibold hover:text-brand">
-                          {a.title}
-                        </Link>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_CONFIG.rejected.className}`}>
-                          Rejected
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {a.submitterName} · {a.currency} {a.total.toLocaleString()}
-                      </p>
-                      {a.activities.find(x => x.type === "rejected")?.note && (
-                        <p className="mt-1 text-xs italic text-muted-foreground">
-                          &quot;{a.activities.find(x => x.type === "rejected")?.note}&quot;
-                        </p>
-                      )}
-                    </div>
-                    <Link href={`/dashboard/agreements/${a.id}`}>
-                      <Button size="sm" variant="ghost">View</Button>
-                    </Link>
+            {/* Comment */}
+            {tab === "pending" && (
+              <div>
+                <label className="text-[13px] font-medium block mb-1.5">
+                  Comment
+                </label>
+                <Textarea
+                  value={comment}
+                  onChange={(e) => setComment((e.target as HTMLTextAreaElement).value)}
+                  placeholder="Add a comment (required for rejection)"
+                  rows={3}
+                  className="rounded-[10px] border-line focus:border-brand focus:ring-[3px] focus:ring-brand/15"
+                />
+              </div>
+            )}
+
+            {/* Activity */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Activity</h4>
+              <div className="space-y-1">
+                {selected.activities.map((act) => (
+                  <div key={act.id} className="text-[13px] py-1.5 border-b border-line-soft last:border-b-0">
+                    <span className="font-semibold">{act.userName}</span>{" "}
+                    {act.type} {act.timestamp && `· ${new Date(act.timestamp).toLocaleDateString("en-GB")}`}
+                    {act.note && <p className="text-[12px] text-mute mt-0.5 italic">{act.note}</p>}
                   </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </TabsContent>
-      </Tabs>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </Drawer>
     </div>
   );
 }

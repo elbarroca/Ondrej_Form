@@ -4,15 +4,31 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getAgreements } from "@/lib/auth/mockData";
-import { Card, CardContent } from "@/components/ui/card";
+import { KpiCard } from "@/components/ui/kpi-card";
+import { ReportRow } from "@/components/ui/report-row";
+import { ApprovalRow } from "@/components/ui/approval-row";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
+import {
+  TrendingUpIcon,
+  TrendingDownIcon,
+  DollarSignIcon,
+  ClockIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  FileTextIcon,
+  PlusIcon,
+  ArrowRightIcon,
+} from "lucide-react";
 import type { Agreement } from "@/lib/auth/types";
+import type { ReportStatus } from "@/lib/types";
 
-const STATUS_CONFIG: Record<Agreement["status"], { label: string; className: string }> = {
-  draft: { label: "Draft", className: "bg-blue-100 text-blue-700 border-blue-200" },
-  submitted: { label: "Submitted", className: "bg-amber-100 text-amber-700 border-amber-200" },
-  approved: { label: "Approved", className: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  rejected: { label: "Rejected", className: "bg-red-100 text-red-700 border-red-200" },
+type AgreementStatusMap = Record<string, ReportStatus>;
+const STATUS_MAP: Record<Agreement["status"], ReportStatus> = {
+  draft: "draft",
+  submitted: "submitted",
+  approved: "approved",
+  rejected: "rejected",
 };
 
 export default function DashboardPage() {
@@ -23,169 +39,188 @@ export default function DashboardPage() {
     setAgreements(getAgreements());
   }, []);
 
-  const stats = {
-    total: agreements.length,
-    pending: agreements.filter(a => a.status === "submitted").length,
-    approvedThisMonth: agreements.filter(a => {
-      if (a.status !== "approved") return false;
-      const act = a.activities.find(x => x.type === "approved");
-      if (!act) return false;
-      return act.timestamp.startsWith(new Date().toISOString().slice(0, 7));
-    }).length,
-    totalSubmitted: agreements.reduce((s, a) => s + a.total, 0),
-  };
+  const submitted = agreements.filter((a) => a.status === "submitted");
+  const approved = agreements.filter((a) => a.status === "approved");
+  const rejected = agreements.filter((a) => a.status === "rejected");
+  const totalThisMonth = agreements.reduce((s, a) => {
+    if (a.createdAt.startsWith(new Date().toISOString().slice(0, 7))) return s + a.total;
+    return s;
+  }, 0);
 
   const recentAgreements = agreements.slice(0, 5);
+  const pendingApprovals = agreements.filter(
+    (a) => a.status === "submitted"
+  );
+
+  // Spend by category mock
+  const spendCategories = [
+    { label: "Travel", amount: 4200, fill: 70 },
+    { label: "Lodging", amount: 3800, fill: 63 },
+    { label: "Meals", amount: 400, fill: 7 },
+    { label: "Supplies", amount: 600, fill: 10 },
+  ];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Welcome back{user?.name ? `, ${user.name.split(" ")[0]}` : ""}. Track your agreements and reimbursements.
-        </p>
+    <div className="space-y-7">
+      {/* Page head */}
+      <div className="flex items-start justify-between gap-5">
+        <div>
+          <h1 className="text-[26px] font-semibold tracking-[-0.02em]">
+            Overview
+          </h1>
+          <p className="mt-1.5 text-sm text-mute">
+            Welcome back{user?.name ? `, ${user.name.split(" ")[0]}` : ""}. Here&apos;s what&apos;s happening.
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="ghost" size="sm">Export</Button>
+          <Link href="/dashboard/agreements/new">
+            <Button variant="primary" size="sm" leftIcon={<PlusIcon className="size-3.5" />}>
+              New report
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Agreements" value={stats.total} className="text-brand" />
-        <StatCard label="Pending Approval" value={stats.pending} className="text-amber-600" />
-        <StatCard label="Approved This Month" value={stats.approvedThisMonth} className="text-emerald-600" />
-        <StatCard label="Total Submitted (EUR)" value={`€${(stats.totalSubmitted / 1000).toFixed(1)}k`} className="font-semibold" />
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-[var(--card-gap)]">
+        <KpiCard
+          label="This month total"
+          value={`EUR ${totalThisMonth.toLocaleString()}`}
+          icon={<DollarSignIcon className="size-3.5" />}
+          trend={{ direction: "up", text: "+12% vs last month" }}
+          variant="default"
+        />
+        <KpiCard
+          label="Pending approval"
+          value={String(submitted.length)}
+          icon={<ClockIcon className="size-3.5" />}
+          trend={submitted.length > 0 ? { direction: "down", text: "-2 vs last month" } : undefined}
+          variant="amber"
+        />
+        <KpiCard
+          label="Approved"
+          value={String(approved.length)}
+          icon={<CheckCircleIcon className="size-3.5" />}
+          trend={{ direction: "up", text: "+3 vs last month" }}
+          variant="emerald"
+        />
+        <KpiCard
+          label="Rejected"
+          value={String(rejected.length)}
+          icon={<XCircleIcon className="size-3.5" />}
+          trend={{ direction: "neutral", text: "No change" }}
+          variant="violet"
+        />
       </div>
 
-      <Card>
-        <CardContent className="p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="font-semibold">Recent agreements</h2>
-            <Link href="/dashboard/agreements/new">
-              <Button size="sm">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                New Agreement
-              </Button>
+      {/* Main grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-[var(--card-gap)]">
+        {/* Recent reports */}
+        <div className="rounded-[14px] border border-line bg-white overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
+            <h3 className="text-[14.5px] font-semibold">Recent reports</h3>
+            <Link
+              href="/dashboard/agreements"
+              className="text-[12.5px] text-mute hover:text-brand transition-colors inline-flex items-center gap-1"
+            >
+              View all <ArrowRightIcon className="size-3" />
             </Link>
           </div>
+          <div className="py-1">
+            {recentAgreements.length === 0 ? (
+              <EmptyState
+                icon={<FileTextIcon className="size-12" />}
+                headline="No reports yet"
+                helper="Create your first report to start tracking reimbursements"
+                cta={{ label: "Create your first report", href: "/dashboard/agreements/new" }}
+              />
+            ) : (
+              recentAgreements.map((a) => (
+                <ReportRow
+                  key={a.id}
+                  id={a.id}
+                  title={a.title}
+                  reference={a.id.toUpperCase()}
+                  status={STATUS_MAP[a.status]}
+                  amount={`${a.currency} ${a.total.toLocaleString()}`}
+                  date={a.createdAt}
+                  href={`/dashboard/agreements/${a.id}`}
+                />
+              ))
+            )}
+          </div>
+        </div>
 
-          {recentAgreements.length === 0 ? (
-            <div className="py-14 text-center">
-              <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-full bg-muted">
-                <svg className="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <p className="text-sm font-medium">No agreements yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">Create your first agreement to start tracking reimbursements</p>
-              <Link href="/dashboard/agreements/new">
-                <Button className="mt-4" size="sm">Create agreement →</Button>
+        {/* Pending approvals */}
+        <div className="rounded-[14px] border border-line bg-white overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
+            <h3 className="text-[14.5px] font-semibold">Pending approvals</h3>
+            {canApprove && (
+              <Link
+                href="/dashboard/approvals"
+                className="text-[12.5px] text-mute hover:text-brand transition-colors inline-flex items-center gap-1"
+              >
+                View all <ArrowRightIcon className="size-3" />
               </Link>
+            )}
+          </div>
+          <div>
+            {pendingApprovals.length === 0 ? (
+              <EmptyState
+                icon={<CheckCircleIcon className="size-12" />}
+                headline="Nothing waiting on you"
+                helper="All reports have been reviewed"
+              />
+            ) : (
+              pendingApprovals.map((a) => (
+                <ApprovalRow
+                  key={a.id}
+                  submitterName={a.submitterName}
+                  submitterInitials={a.submitterName
+                    .split(" ")
+                    .map((n) => n[0])
+                    .join("")
+                    .slice(0, 2)}
+                  amount={`${a.currency} ${a.total.toLocaleString()}`}
+                  title={a.title}
+                  when={a.createdAt}
+                  onClick={() => {
+                    window.location.href = `/dashboard/agreements/${a.id}`;
+                  }}
+                />
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Spend by category */}
+      <div className="rounded-[14px] border border-line bg-white overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
+          <h3 className="text-[14.5px] font-semibold">Spend by category</h3>
+          <span className="text-[12.5px] text-mute">This month</span>
+        </div>
+        <div className="p-5">
+          {spendCategories.map((cat) => (
+            <div
+              key={cat.label}
+              className="grid grid-cols-[110px_1fr_70px] items-center gap-2.5 mb-3 last:mb-0"
+            >
+              <span className="text-[13px]">{cat.label}</span>
+              <div className="h-2 rounded-full bg-paper overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-brand"
+                  style={{ width: `${cat.fill}%` }}
+                />
+              </div>
+              <span className="text-[12.5px] text-mute text-right tabular-nums">
+                EUR {cat.amount.toLocaleString()}
+              </span>
             </div>
-          ) : (
-            <ul className="space-y-3">
-              {recentAgreements.map((a) => {
-                const statusCfg = STATUS_CONFIG[a.status];
-                return (
-                  <li key={a.id}>
-                    <Link
-                      href={`/dashboard/agreements/${a.id}`}
-                      className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-4 transition-all hover:border-brand/40 hover:bg-brand/5"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold">{a.title}</p>
-                        <div className="mt-1 flex items-center gap-2">
-                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusCfg.className}`}>
-                            {statusCfg.label}
-                          </span>
-                          <span className="text-xs text-muted-foreground">{a.submitterName}</span>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-sm font-medium">{a.currency} {a.total.toLocaleString()}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{a.createdAt}</p>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardContent className="p-6">
-            <h3 className="mb-4 font-semibold">Quick actions</h3>
-            <ul className="space-y-2.5">
-              <li>
-                <Link href="/dashboard/agreements/new" className="flex items-center gap-2.5 text-sm text-muted-foreground hover:text-brand transition-colors">
-                  <svg className="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                  New Agreement
-                </Link>
-              </li>
-              {canApprove && (
-                <li>
-                  <Link href="/dashboard/approvals" className="flex items-center gap-2.5 text-sm text-muted-foreground hover:text-brand transition-colors">
-                    <svg className="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    View Pending Approvals
-                  </Link>
-                </li>
-              )}
-              <li>
-                <Link href="/dashboard/receivables" className="flex items-center gap-2.5 text-sm text-muted-foreground hover:text-brand transition-colors">
-                  <svg className="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
-                  View Receivables
-                </Link>
-              </li>
-              <li>
-                <Link href="/dashboard/identity" className="flex items-center gap-2.5 text-sm text-muted-foreground hover:text-brand transition-colors">
-                  <svg className="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                  Update Identity
-                </Link>
-              </li>
-            </ul>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <h3 className="mb-4 font-semibold">How it works</h3>
-            <ol className="space-y-2">
-              {[
-                "Create an agreement (event, project, trip)",
-                "Add receivables (receipts, expenses)",
-                "Categorize and confirm amounts",
-                "Submit for approval",
-                "Download the PDF",
-              ].map((step, i) => (
-                <li key={i} className="flex items-start gap-2.5 text-sm text-muted-foreground">
-                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand/10 text-brand text-xs font-semibold">{i + 1}</span>
-                  {step}
-                </li>
-              ))}
-            </ol>
-          </CardContent>
-        </Card>
+          ))}
+        </div>
       </div>
     </div>
-  );
-}
-
-function StatCard({ label, value, className }: { label: string; value: string | number; className?: string }) {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <p className={`text-3xl font-semibold ${className}`}>{value}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{label}</p>
-      </CardContent>
-    </Card>
   );
 }
