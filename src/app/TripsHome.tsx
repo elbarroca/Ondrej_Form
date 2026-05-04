@@ -134,7 +134,7 @@ function Section({
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2
           className={`text-sm font-semibold uppercase tracking-wide ${
-            accent ? "text-accent" : "text-mute"
+            accent ? "text-brand" : "text-mute"
           }`}
         >
           {title}
@@ -195,14 +195,14 @@ function EventCard({
     : trip
       ? { label: "In progress", cls: "bg-ink text-paper" }
       : status === "active"
-        ? { label: "Active now", cls: "bg-accent text-white" }
+        ? { label: "Active now", cls: "bg-brand text-white" }
         : status === "submission_open"
           ? deadlineDays !== null && deadlineDays >= 0
             ? {
                 label: `Submit · ${deadlineDays}d left`,
-                cls: "bg-accent text-white",
+                cls: "bg-brand text-white",
               }
-            : { label: "Submission open", cls: "bg-accent text-white" }
+            : { label: "Submission open", cls: "bg-brand text-white" }
           : status === "upcoming"
             ? { label: "Upcoming", cls: "border border-line text-ink" }
             : { label: "Past", cls: "border border-line text-mute" };

@@ -1,21 +1,23 @@
-import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import type { Metadata, Viewport } from "next"
+import { Geist, Geist_Mono } from "next/font/google"
+import { AuthProvider } from "@/lib/auth/AuthContext"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import "./globals.css"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
-});
+})
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-});
+})
 
 export const metadata: Metadata = {
-  title: "Reimburse — submission-ready expense PDFs in 60 seconds",
+  title: "Reimburse — reimbursement software for public sector",
   description:
-    "Fill identity once, drop receipts per trip, generate a submission-ready reimbursement PDF. Reusable for every conference.",
+    "Simple, affordable reimbursement tool for government agencies and public sector workers. Drop receipts, submit, done.",
   applicationName: "Reimburse",
   appleWebApp: {
     capable: true,
@@ -23,26 +25,27 @@ export const metadata: Metadata = {
     title: "Reimburse",
   },
   formatDetection: { telephone: false },
-};
+}
 
 export const viewport: Viewport = {
-  themeColor: "#fafaf7",
+  themeColor: "#fafaf8",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-};
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-paper text-ink">
-        {children}
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="antialiased">
+        <TooltipProvider>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </TooltipProvider>
       </body>
     </html>
-  );
+  )
 }

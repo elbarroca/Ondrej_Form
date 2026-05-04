@@ -1,53 +1,24 @@
-"use client";
+'use client'
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Link from 'next/link'
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const links = [
-    { href: "/", label: "Trips" },
-    { href: "/identity", label: "Identity" },
-  ];
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b border-line bg-paper/85 backdrop-blur sticky top-0 z-10">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
-          <Link
-            href="/"
-            className="flex min-w-0 items-center gap-2"
-            aria-label="Reimburse home"
-          >
-            <span
-              aria-hidden
-              className="grid h-7 w-7 place-items-center rounded-md bg-ink text-paper text-xs font-bold"
-            >
-              R
-            </span>
-            <span className="font-mono text-[11px] uppercase tracking-widest text-mute sm:text-xs">
-              reimburse
-            </span>
+      <header className="sticky top-0 z-40 border-b border-line/60 bg-white/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <Link href="/" className="flex min-w-0 items-center gap-2">
+            <div className="grid h-7 w-7 place-items-center rounded-md bg-brand shadow-sm">
+              <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <span className="font-mono text-[11px] uppercase tracking-widest text-mute sm:text-xs">reimburse</span>
           </Link>
           <nav className="flex items-center gap-1">
-            {links.map((l) => {
-              const active =
-                l.href === "/"
-                  ? pathname === "/"
-                  : pathname.startsWith(l.href);
-              return (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={`rounded-md px-3 py-1.5 text-sm transition ${
-                    active
-                      ? "bg-ink text-paper"
-                      : "text-ink hover:bg-line/60"
-                  }`}
-                >
-                  {l.label}
-                </Link>
-              );
-            })}
+            <ShellLink href="/">Trips</ShellLink>
+            <ShellLink href="/identity">Identity</ShellLink>
+            <ShellLink href="/demo">Demo</ShellLink>
           </nav>
         </div>
       </header>
@@ -58,5 +29,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
         Stored locally. Nothing leaves your browser.
       </footer>
     </div>
-  );
+  )
+}
+
+function ShellLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="rounded-md px-3 py-1.5 text-sm text-ink transition-colors hover:bg-slate-100">
+      {children}
+    </Link>
+  )
 }
